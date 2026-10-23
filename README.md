@@ -42,26 +42,74 @@ CLAUDE_MANAGED_ENVIRONMENT_ID=your_environment_id
 PORT=3057
 ```
 
-## How the application was developed
+## How the app was build
 
-The browser collects inputs; the Node host validates requests; the lesson implementation produces observable evidence. The architecture page walks through the real source with numbered steps, prerequisite configuration, source filenames and code excerpts.
+### 1. Authorize before preparing a public stream view
 
-### Lesson implementation
+Only the seeded owned session key is admitted. In a real frontend, the host must derive the principal and reader binding from authenticated state before opening the stream.
 
-[src/lesson.ts](https://github.com/luiscoco/Udemy-claude-managed-agents-lesson-c57-app/blob/main/src/lesson.ts)
+Source: [src/lesson.ts](src/lesson.ts#L13)
 
 ```typescript
-  async run(input) {
-
-if(text(input,"sessionKey")!=="owned")return report("rejected","Unknown or unauthorized session",{authorized:false},["Use the host-owned principal","Check tenant and reader binding before opening"]);
-const type=text(input,"eventType"),projected=type==="agent.message"?{type:"answer",text:text(input,"message")}:type==="session.status_idle"?{type:"idle",reason:"end_turn"}:null;
-return report("passed","Applied the public event projection after authorization",{authorized:true,projected,rawInternalRecordForwarded:false},["Authorize the conversation","Project only public fields","Render text safely","Keep disconnect separate from remote stop"]);
-
-  }
-};
+if (text(input, "sessionKey") !== "owned")
+  return report(
+    "rejected",
+    "Unknown or unauthorized session",
+    { authorized: false },
+    [
+      "Use the host-owned principal",
+      "Check tenant and reader binding before opening",
+    ],
+  );
 ```
 
-Read the architecture page for the remaining source excerpts and explanations, including input handling and optional provider behavior. The diagram describes this application, rather than implying that an external integration has been implemented.
+### 2. Project public fields instead of raw provider records
+
+Message events become answer text, idle becomes a public lifecycle record, and other types are omitted. rawInternalRecordForwarded is false; this reducer models projection rather than serving a multi-tenant SSE endpoint.
+
+Source: [src/lesson.ts](src/lesson.ts#L14) · selected statements
+
+```typescript
+const type = text(input, "eventType"),
+  projected =
+    type === "agent.message"
+      ? { type: "answer", text: text(input, "message") }
+      : type === "session.status_idle"
+        ? { type: "idle", reason: "end_turn" }
+        : null;
+
+return report(
+  "passed",
+  "Applied the public event projection after authorization",
+  { authorized: true, projected, rawInternalRecordForwarded: false },
+  [
+    "Authorize the conversation",
+    "Project only public fields",
+    "Render text safely",
+    "Keep disconnect separate from remote stop",
+  ],
+);
+```
+
+### Check your understanding
+
+Run **Project an owned conversation** in the application. Compare the result with these scenario expectations:
+
+```json
+{
+  "input": {
+    "sessionKey": "owned",
+    "eventType": "agent.message",
+    "message": "Hello student"
+  },
+  "expectedOutcome": "passed",
+  "checkEvidence": {
+    "authorized": true
+  }
+}
+```
+
+Then try **Reject another tenant session**. Its expected outcome is `rejected`; identify the condition or evidence field that explains the difference.
 
 ## Validation
 
