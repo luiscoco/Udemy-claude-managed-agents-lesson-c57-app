@@ -1,0 +1,70 @@
+// Minimal server-side SSE projection with injected authorization.
+import type { Request, Response, RequestHandler } from "express";
+import { once } from "node:events";
+import { z } from "zod";
+import type { BetaManagedAgentsSessionEvent as Event } from "@anthropic-ai/sdk/resources/beta/sessions/events";
+export type Principal = { tenantId: string; userId: string };
+export type SessionBinding = { sessionId: string; tenantId: string; readerIds: ReadonlySet<string> };
+export function authorize(principal: Principal, binding: SessionBinding | undefined) {
+  if (!binding || principal.tenantId !== binding.tenantId || !binding.readerIds.has(principal.userId))
+    throw new Error("Unknown or unauthorized session");
+  return binding.sessionId;
+}
+export function project(event: Event) {
+  if (event.type === "agent.message") return { type: "answer" as const,
+    text: event.content.filter(b => b.type === "text").map(b => b.text).join("") };
+  if (event.type === "session.status_idle") return { type: "idle" as const, reason: event.stop_reason.type };
+  return null; // No tool inputs, credentials, raw spans, thread IDs or internal error details.
+}
+export const frame = (data: object) => `data: ${JSON.stringify(data)}\n\n`;
+export function createHandler(deps: {
+  authenticate(req: Request): Promise<Principal>;
+  lookup(localSessionKey: string): Promise<SessionBinding | undefined>;
+  open(sessionId: string, signal: AbortSignal): Promise<AsyncIterable<Event>>;
+}): RequestHandler {
+  return async (req, res) => {
+    let sessionId: string;
+    try {
+      const principal = await deps.authenticate(req);
+      const localKey = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).parse(req.params.sessionKey);
+      sessionId = authorize(principal, await deps.lookup(localKey));
+    } catch { res.status(404).end(); return; }
+    const controller = new AbortController();
+    const close = () => controller.abort();
+    res.on("close", close);
+    const timer = setTimeout(close, 60000);
+    try {
+      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      const stream = await deps.open(sessionId, controller.signal);
+      let count = 0;
+      for await (const event of stream) {
+        if (controller.signal.aborted || ++count > 300) break;
+        const data = project(event);
+        if (!data) continue;
+        if (JSON.stringify(data).length > 12000) throw new Error("Output limit");
+        if (!res.write(frame(data))) await once(res, "drain", { signal: controller.signal });
+        if (data.type === "idle") break;
+      }
+    } catch {
+      if (!controller.signal.aborted && !res.writableEnded && !res.destroyed)
+        res.write(frame({ type: "error", message: "Observation interrupted" }));
+    } finally {
+      clearTimeout(timer); controller.abort(); res.off("close", close);
+      if (!res.writableEnded && !res.destroyed) res.end();
+    }
+  };
+}
+// Route: app.get('/api/sessions/:sessionKey/stream', createHandler(dependencies)).
+// Authentication, same-origin/CORS policy, rate limits, revocation, heartbeat,
+// history recovery and public reconnect cursors are deployment responsibilities.
+// deps.open must honor abort and release its upstream stream in finally.
+// This example forwards canonical buffered answers, not token previews. Previews
+// require event_deltas plus reconciliation with the final message.
+// Projection does not sanitize secrets already present in model text: apply the
+// product's content policy, authorization and safe text rendering independently.
+// One tenant can own many sessions. Do not mix unauthorized tenants in one context.
+// Vault IDs are workspace-scoped; tenant labels alone are not provider isolation.
+// Client disconnect closes local observation only; remote execution is separate.

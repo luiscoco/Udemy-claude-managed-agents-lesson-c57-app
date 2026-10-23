@@ -1,0 +1,29 @@
+{
+  "source": "live-provider-commentary",
+  "sessionId": "sesn_01322MTLPHfRN5psg2Rt2HLo",
+  "answer": "This local experiment demonstrates a pattern for real-time frontends in multi-tenant SaaS: after authorizing a conversation, only public fields are projected from an event before rendering. Internal or sensitive record data is never forwarded to the client. Disconnection handling is kept separate from any remote stop logic.",
+  "stopReason": "end_turn",
+  "eventTypes": [
+    "session.status_running",
+    "session.thread_status_running",
+    "user.message",
+    "span.model_request_start",
+    "agent.thinking",
+    "agent.message",
+    "span.model_request_end",
+    "session.thread_status_idle",
+    "session.usage",
+    "session.status_idle"
+  ],
+  "requestUsage": [
+    {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "input_tokens": 594,
+      "output_tokens": 98,
+      "speed": "standard"
+    }
+  ],
+  "experimentHash": "c95a12670bf91efc6867191df9daf2195b3044b23260cd60c8b87c501fea3cb6",
+  "scope": "A real text-only model response about the local experiment. External integrations and the experiment's correctness are not certified by this response."
+}
